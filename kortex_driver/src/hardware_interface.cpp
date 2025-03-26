@@ -76,7 +76,7 @@ KortexMultiInterfaceHardware::KortexMultiInterfaceHardware()
   use_internal_bus_gripper_comm_(false)
 {
   RCLCPP_INFO(LOGGER, "Setting severity threshold to DEBUG");
-  auto ret = rcutils_logging_set_logger_level(LOGGER.get_name(), RCUTILS_LOG_SEVERITY_DEBUG);
+  auto ret = rcutils_logging_set_logger_level(LOGGER.get_name(), RCUTILS_LOG_SEVERITY_DEBUG); // Debug messages will be printed
   if (ret != RCUTILS_RET_OK)
   {
     RCLCPP_ERROR(LOGGER, "Error setting severity: %s", rcutils_get_error_string().str);
@@ -122,7 +122,7 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
     RCLCPP_ERROR(LOGGER, "Password is empty!");
     return CallbackReturn::ERROR;
   }
-  int port = std::stoi(info_.hardware_parameters["port"]);
+  int port = std::stoi(info_.hardware_parameters["port"]); // string to integer conversion
   if (port <= 0)
   {
     RCLCPP_ERROR(LOGGER, "Incorrect port number!");
@@ -227,10 +227,6 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
   // initialize kortex api twist commandd
   {
     k_api_twist_command_.set_reference_frame(k_api::Common::CARTESIAN_REFERENCE_FRAME_TOOL);
-    // command.set_duration = execute time (milliseconds) according to the api ->
-    // (not implemented yet)
-    // see: https://github.com/Kinovarobotics/kortex/blob/master/api_cpp/doc/markdown/messages/Base/TwistCommand.md
-    k_api_twist_command_.set_duration(0);
     k_api_twist_ = k_api_twist_command_.mutable_twist();
   }
 
@@ -246,7 +242,7 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
   arm_commands_velocities_.resize(actuator_count_, std::numeric_limits<double>::quiet_NaN());
   arm_commands_efforts_.resize(actuator_count_, std::numeric_limits<double>::quiet_NaN());
   arm_joints_control_level_.resize(
-    actuator_count_, integration_lvl_t::UNDEFINED);  // start in undefined
+    actuator_count_, integration_lvl_t::UNDEFINED);  // start with undefined control mode for each joint rather than POSITION/VELOCITY/EFFORT
   gripper_command_position_ = std::numeric_limits<double>::quiet_NaN();
   gripper_position_ = std::numeric_limits<double>::quiet_NaN();
 
@@ -278,17 +274,16 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
     }
   }
 
-  if (
-    (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "true") ||
-    (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "True"))
+  if (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "true")
   {
     use_internal_bus_gripper_comm_ = true;
     RCLCPP_INFO(LOGGER, "Using internal bus communication for gripper!");
   }
 
-  RCLCPP_INFO(LOGGER, "Hardware Interface successfully configured");
+  RCLCPP_INFO(LOGGER, "Hardware Interface successfully setup");
   return CallbackReturn::SUCCESS;
 }
+
 
 std::vector<hardware_interface::StateInterface>
 KortexMultiInterfaceHardware::export_state_interfaces()
@@ -338,6 +333,7 @@ KortexMultiInterfaceHardware::export_command_interfaces()
   for (std::size_t i = 0; i < info_.joints.size(); i++)
   {
     if (info_.joints[i].name == gripper_joint_name_)
+    // Always expose all interfaces even if part of them is claimed under <ros2_control> in URDF 
     {
       command_interfaces.emplace_back(hardware_interface::CommandInterface(
         info_.joints[i].name, hardware_interface::HW_IF_POSITION, &gripper_command_position_));
@@ -355,6 +351,7 @@ KortexMultiInterfaceHardware::export_command_interfaces()
     }
   }
   for (std::size_t i = 0; i < arm_joint_names.size(); i++)
+  // Always expose all interfaces even if part of them is claimed under <ros2_control> in URDF 
   {
     {
       command_interfaces.emplace_back(hardware_interface::CommandInterface(
@@ -381,12 +378,14 @@ KortexMultiInterfaceHardware::export_command_interfaces()
     hardware_interface::CommandInterface("tcp", "twist.angular.z", &twist_commands_[5]));
 
   command_interfaces.emplace_back(
-    hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_));
+    hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_)); // zero or non-zero value reporting then robot fault state 
+                                                                                        // (higher number ==> higher fault severity)
 
   command_interfaces.emplace_back(hardware_interface::CommandInterface(
-    "reset_fault", "async_success", &reset_fault_async_success_));
+    "reset_fault", "async_success", &reset_fault_async_success_)); // Reports whether the fault state was successfully triggered (1.0) or not (0.0)
 
   return command_interfaces;
+  // Command interfaces values are set by the controllers and communicated through the Controller Manager
 }
 
 return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
@@ -773,8 +772,7 @@ return_type KortexMultiInterfaceHardware::read(
     // read position
     num_turns_tmp_ = 0;
     arm_positions_[i] = KortexMathUtil::wrapRadiansFromMinusPiToPi(
-      KortexMathUtil::toRad(feedback_.actuators(i).position()),
-      num_turns_tmp_);  // rad
+      KortexMathUtil::toRad(feedback_.actuators(i).position()));  // rad
 
     in_fault_ += (feedback_.actuators(i).fault_bank_a() + feedback_.actuators(i).fault_bank_b());
 
