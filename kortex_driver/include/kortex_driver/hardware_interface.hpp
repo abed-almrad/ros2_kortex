@@ -61,11 +61,11 @@ namespace kortex_driver
 enum class StopStartInterface : std::uint8_t // Memory efficient instead of the default int 
 {
   NONE,
-  STOP_POS_VEL,
+  STOP_POS,
   STOP_TWIST,
   STOP_GRIPPER,
   STOP_FAULT_CTRL,
-  START_POS_VEL,
+  START_POS,
   START_TWIST,
   START_GRIPPER,
   START_FAULT_CTRL,

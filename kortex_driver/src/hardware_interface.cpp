@@ -317,9 +317,12 @@ KortexMultiInterfaceHardware::export_state_interfaces()
       arm_joint_names[i], hardware_interface::HW_IF_EFFORT, &arm_efforts_[i]));
   }
 
-  // state interface which reports if robot is faulted
+  // state interface which reports if robot is in fault state (regardless of whether triggered or not)
   state_interfaces.emplace_back(
     hardware_interface::StateInterface("reset_fault", "internal_fault", &in_fault_));
+  state_interfaces.emplace_back(hardware_interface::StateInterface(
+    "reset_fault", "async_success", &reset_fault_async_success_)); // Reports whether the fault state was successfully triggered (1.0) or not (0.0)
+
 
   return state_interfaces;
 }
@@ -378,19 +381,15 @@ KortexMultiInterfaceHardware::export_command_interfaces()
     hardware_interface::CommandInterface("tcp", "twist.angular.z", &twist_commands_[5]));
 
   command_interfaces.emplace_back(
-    hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_)); // zero or non-zero value reporting then robot fault state 
+    hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_)); // zero or non-zero value putting the robot in fault state 
                                                                                         // (higher number ==> higher fault severity)
-
-  command_interfaces.emplace_back(hardware_interface::CommandInterface(
-    "reset_fault", "async_success", &reset_fault_async_success_)); // Reports whether the fault state was successfully triggered (1.0) or not (0.0)
-
   return command_interfaces;
   // Command interfaces values are set by the controllers and communicated through the Controller Manager
 }
 
 return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
   const std::vector<std::string> & start_interfaces,
-  const std::vector<std::string> & stop_interfaces)
+  const std::vector<std::string> & stop_interfaces) // stop and start interfaces are automatically filled by the Controller Manager when a switch is triggered
 {
   hardware_interface::return_type ret_val = hardware_interface::return_type::OK;
 
@@ -400,9 +399,8 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
   start_joint_based_controller_ = start_twist_controller_ = start_fault_controller_ =
     start_gripper_controller_ = false;
 
-  // sleep to ensure all outgoing write commands have finished
-  block_write = true;
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  block_write = true; // stops writing to the robot until done with the command switching
+  std::this_thread::sleep_for(std::chrono::milliseconds(200)); // sleep to ensure all outgoing write commands have finished
 
   start_modes_.clear();
   stop_modes_.clear();
@@ -411,39 +409,14 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
   // add stop interface per joint in tmp var for later check
   for (const auto & key : stop_interfaces)
   {
-    for (auto & joint : info_.joints)
+    if (key == gripper_joint_name_ + "/" + hardware_interface::HW_IF_POSITION)
     {
-      if (
-        key == joint.name + "/" + hardware_interface::HW_IF_POSITION &&
-        joint.name == gripper_joint_name_)
-      {
-        stop_modes_.emplace_back(StopStartInterface::STOP_GRIPPER);
-        continue;
-      }
-      if (
-        key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY &&
-        joint.name == gripper_joint_name_)
-      {
-        continue;
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
-      {
-        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
-      {
-        stop_modes_.emplace_back(StopStartInterface::STOP_POS_VEL);
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
-      {
-        continue;
-        // not supporting effort command interface
-        //              start_modes_.emplace_back(hardware_interface::HW_IF_EFFORT);
-        RCLCPP_ERROR(
-          LOGGER,
-          "KortexMultiInterfaceHardware does not support effort command "
-          "interface!");
-      }
+      stop_modes_.emplace_back(StopStartInterface::STOP_GRIPPER);
+      continue;
+    }
+    if (key == gripper_joint_name_ + "/" + hardware_interface::HW_IF_VELOCITY)
+    {
+      continue; // gripper velocity control is not implemented in write()
     }
     if (
       (key == "tcp/twist.linear.x") || (key == "tcp/twist.linear.y") ||
@@ -451,48 +424,45 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       (key == "tcp/twist.angular.y") || (key == "tcp/twist.angular.z"))
     {
       stop_modes_.emplace_back(StopStartInterface::STOP_TWIST);
+      continue;
     }
-    if ((key == "reset_fault/command") || (key == "reset_fault/async_success"))
+    if (key == "reset_fault/command")
     {
       stop_modes_.emplace_back(StopStartInterface::STOP_FAULT_CTRL);
+      continue;
     }
+
+    for (auto & joint : info_.joints)
+    {
+      if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
+      {
+        stop_modes_.emplace_back(StopStartInterface::STOP_POS);
+        break;
+      }
+      if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
+      {
+        break; // joint velocity control is not implemented in write()
+      }
+      if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
+      {
+        break; // joint effort control is not implemented in write()
+      }
+    }
+
   }
 
   // Starting interfaces
   // add start interface per joint in tmp var for later check
   for (const auto & key : start_interfaces)
   {
-    for (auto & joint : info_.joints)
+    if (key == gripper_joint_name_ + "/" + hardware_interface::HW_IF_POSITION)
     {
-      if (
-        key == joint.name + "/" + hardware_interface::HW_IF_POSITION &&
-        joint.name == gripper_joint_name_)
-      {
-        start_modes_.emplace_back(StopStartInterface::START_GRIPPER);
-        continue;
-      }
-      if (
-        key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY &&
-        joint.name == gripper_joint_name_)
-      {
-        continue;
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
-      {
-        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
-      {
-        start_modes_.emplace_back(StopStartInterface::START_POS_VEL);
-      }
-      if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
-      {
-        continue;
-        RCLCPP_ERROR(
-          LOGGER,
-          "KortexMultiInterfaceHardware does not support effort command "
-          "interface!");
-      }
+      start_modes_.emplace_back(StopStartInterface::START_GRIPPER);
+      continue;
+    }
+    if (key == gripper_joint_name_ + "/" + hardware_interface::HW_IF_VELOCITY)
+    {
+      continue; // gripper velocity control is not implemented in write()
     }
     if (
       (key == "tcp/twist.linear.x") || (key == "tcp/twist.linear.y") ||
@@ -500,17 +470,37 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
       (key == "tcp/twist.angular.y") || (key == "tcp/twist.angular.z"))
     {
       start_modes_.emplace_back(StopStartInterface::START_TWIST);
+      continue;
     }
-    if ((key == "reset_fault/command") || (key == "reset_fault/async_success"))
+    if (key == "reset_fault/command")
     {
       start_modes_.emplace_back(StopStartInterface::START_FAULT_CTRL);
+      continue;
     }
+
+    for (auto & joint : info_.joints)
+    {
+      if (key == joint.name + "/" + hardware_interface::HW_IF_POSITION)
+      {
+        start_modes_.emplace_back(StopStartInterface::START_POS);
+        break;
+      }
+      if (key == joint.name + "/" + hardware_interface::HW_IF_VELOCITY)
+      {
+        break; // joint velocity control is not implemented in write()
+      }
+      if (key == joint.name + "/" + hardware_interface::HW_IF_EFFORT)
+      {
+        break; // joint effort control is not implemented in write()
+      }
+    }
+
   }
 
   // prepare flags for performing the switch
   if (
     !stop_modes_.empty() &&
-    std::find(stop_modes_.begin(), stop_modes_.end(), StopStartInterface::STOP_POS_VEL) !=
+    std::find(stop_modes_.begin(), stop_modes_.end(), StopStartInterface::STOP_POS) !=
       stop_modes_.end())
   {
     stop_joint_based_controller_ = true;
@@ -539,7 +529,7 @@ return_type KortexMultiInterfaceHardware::prepare_command_mode_switch(
 
   if (
     !start_modes_.empty() &&
-    (std::find(start_modes_.begin(), start_modes_.end(), StopStartInterface::START_POS_VEL) !=
+    (std::find(start_modes_.begin(), start_modes_.end(), StopStartInterface::START_POS) !=
      start_modes_.end()))
   {
     start_joint_based_controller_ = true;
@@ -588,19 +578,23 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
 
   if (stop_joint_based_controller_)
   {
-    joint_based_controller_running_ = false;
+    joint_based_controller_running_ = false; // key boolen in write()
     arm_commands_positions_ = arm_positions_;
-    arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+    arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // commanding the joints to keep their current positions
+                                                              // as a fail-safe mechanism in case the robot was controlled
+                                                          // one last time using residual commands from the joint_based_controller
   }
   if (stop_twist_controller_)
   {
-    twist_controller_running_ = false;
+    twist_controller_running_ = false; // key boolen in write()
     twist_commands_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
   }
   if (stop_gripper_controller_)
   {
-    gripper_controller_running_ = false;
-    gripper_command_position_ = gripper_position_;
+    gripper_controller_running_ = false; // key boolean in write()
+    gripper_command_position_ = gripper_position_; // commanding the gripper to keep its current position
+                                                  // as a fail-safe mechanism in case the gripper was controlled
+                                                  // one last time using residual commands from the gripper_controller
   }
   if (stop_fault_controller_)
   {
@@ -614,8 +608,9 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
     arm_mode_ = k_api::Base::ServoingMode::LOW_LEVEL_SERVOING;
     twist_controller_running_ = false;
     arm_commands_positions_ = arm_positions_;
-    arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-    joint_based_controller_running_ = true;
+    arm_commands_velocities_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // commanding the joints to keep their current positions
+                                                          // to ensure a smooth controller start without unexpected jerk/jittering
+    joint_based_controller_running_ = true; // key boolean in write()
     // refresh feedback
     feedback_ = base_cyclic_.RefreshFeedback();
   }
@@ -625,17 +620,18 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
     base_.SetServoingMode(servoing_mode_hw_);
     arm_mode_ = k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING;
     joint_based_controller_running_ = false;
-    twist_commands_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
-    twist_controller_running_ = true;
+    twist_commands_ = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0}; // zero velocities to ensure a smooth controller start without unexpected
+                                                      // jerk/jittering
+    twist_controller_running_ = true; // key boolean in write()
   }
   if (start_gripper_controller_)
   {
     gripper_command_position_ = gripper_position_;
-    gripper_controller_running_ = true;
+    gripper_controller_running_ = true; // key boolean in write()
   }
   if (start_fault_controller_)
   {
-    fault_controller_running_ = true;
+    fault_controller_running_ = true; // key boolean in write()
   }
 
   // reset auxiliary switching booleans
