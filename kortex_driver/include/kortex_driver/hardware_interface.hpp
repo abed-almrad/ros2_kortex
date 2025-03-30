@@ -195,8 +195,7 @@ private:
 
   // temp variables to use in read()/write() update loop
   float cmd_degrees_tmp_;
-  float cmd_vel_tmp_;
-  int num_turns_tmp_ = 0;
+  //float cmd_vel_tmp_;
 
   // fault control from Kinova Kortex API
   double reset_fault_cmd_;

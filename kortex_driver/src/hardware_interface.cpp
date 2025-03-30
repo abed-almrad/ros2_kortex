@@ -339,14 +339,14 @@ KortexMultiInterfaceHardware::export_command_interfaces()
     // Always expose all interfaces even if part of them is claimed under <ros2_control> in URDF 
     {
       command_interfaces.emplace_back(hardware_interface::CommandInterface(
-        info_.joints[i].name, hardware_interface::HW_IF_POSITION, &gripper_command_position_));
+        info_.joints[i].name, hardware_interface::HW_IF_POSITION, &gripper_command_position_)); // 0 rd < gripper command < 0.81 rd
 
       command_interfaces.emplace_back(hardware_interface::CommandInterface(
         info_.joints[i].name, "set_gripper_max_velocity", &gripper_speed_command_));
-      gripper_speed_command_ = gripper_command_max_velocity_;
+      gripper_speed_command_ = gripper_command_max_velocity_; // gripper speed is always overridden by max value (100.0 as set in the class constructor)
       command_interfaces.emplace_back(hardware_interface::CommandInterface(
         info_.joints[i].name, "set_gripper_max_effort", &gripper_force_command_));
-      gripper_force_command_ = gripper_command_max_force_;
+      gripper_force_command_ = gripper_command_max_force_; // gripper force is always overridden by max value (100.0 as set in the class constructor)
     }
     else
     {
@@ -643,7 +643,7 @@ return_type KortexMultiInterfaceHardware::perform_command_mode_switch(
   start_modes_.clear();
   stop_modes_.clear();
 
-  block_write = false;
+  block_write = false; // resume writing to the robot since the command switching is done
 
   return ret_val;
 }
@@ -671,14 +671,13 @@ CallbackReturn KortexMultiInterfaceHardware::on_activate(
 
   // Initialize interconnect command to current gripper position.
   base_command_.mutable_interconnect()->mutable_command_id()->set_identifier(0);
-  gripper_motor_command_ =
-    base_command_.mutable_interconnect()->mutable_gripper_command()->add_motor_cmd();
-  gripper_motor_command_->set_position(gripper_initial_position);  // % position
-  gripper_motor_command_->set_velocity(gripper_speed_command_);    // % speed
-  gripper_motor_command_->set_force(gripper_force_command_);       // % force
+  gripper_motor_command_ = base_command_.mutable_interconnect()->mutable_gripper_command()->add_motor_cmd();
+  gripper_motor_command_->set_position(gripper_initial_position);  // % initial position
+  gripper_motor_command_->set_velocity(gripper_speed_command_);    // % speed set to max = 100.0 in the export_command_interfaces()
+  gripper_motor_command_->set_force(gripper_force_command_);       // % force set to max = 100.0 in the export_command_interfaces()
 
   // Send a first frame
-  base_feedback = base_cyclic_.Refresh(base_command_);
+  base_feedback = base_cyclic_.Refresh(base_command_); // Send the previously set commands to the arm and the gripper 
   // Set some default values
   for (std::size_t i = 0; i < actuator_count_; i++)
   {
@@ -689,11 +688,11 @@ CallbackReturn KortexMultiInterfaceHardware::on_activate(
     }
     if (std::isnan(arm_velocities_[i]))
     {
-      arm_velocities_[i] = 0;
+      arm_velocities_[i] = 0;  // Since the robot is idle
     }
     if (std::isnan(arm_efforts_[i]))
     {
-      arm_efforts_[i] = 0;
+      arm_efforts_[i] = base_feedback.actuators(i).torque();
     }
     if (std::isnan(arm_commands_positions_[i]))
     {
@@ -702,11 +701,11 @@ CallbackReturn KortexMultiInterfaceHardware::on_activate(
     }
     if (std::isnan(arm_commands_velocities_[i]))
     {
-      arm_commands_velocities_[i] = 0;
+      arm_commands_velocities_[i] = 0;  // Velocity control is not implemented, so this value doesn't matter.
     }
     if (std::isnan(arm_commands_efforts_[i]))
     {
-      arm_commands_efforts_[i] = 0;
+      arm_commands_efforts_[i] = 0; // Effort control is not implemented, so this value doesn't matter.
     }
     arm_joints_control_level_[i] = integration_lvl_t::UNDEFINED;
   }
@@ -739,6 +738,12 @@ CallbackReturn KortexMultiInterfaceHardware::on_deactivate(
   delete k_api_twist_;
   delete gripper_motor_command_;
 
+  // Reset controller flags
+  joint_based_controller_running_ = false;
+  twist_controller_running_ = false;
+  gripper_controller_running_ = false;
+  fault_controller_running_ = false;
+
   RCLCPP_INFO(LOGGER, "KortexMultiInterfaceHardware successfully deactivated!");
 
   return CallbackReturn::SUCCESS;
@@ -747,10 +752,10 @@ CallbackReturn KortexMultiInterfaceHardware::on_deactivate(
 return_type KortexMultiInterfaceHardware::read(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  if (first_pass_)
+  if (first_pass_) // Set to true in the class constructor
   {
     first_pass_ = false;
-    feedback_ = base_cyclic_.RefreshFeedback();
+    feedback_ = base_cyclic_.RefreshFeedback(); // The robot state is read only the first time in read() and subsquently in write() to minimize bandwidth
   }
 
   // read if robot is faulted
@@ -766,33 +771,25 @@ return_type KortexMultiInterfaceHardware::read(
     // read velocity
     arm_velocities_[i] = KortexMathUtil::toRad(feedback_.actuators(i).velocity());  // rad/sec
     // read position
-    num_turns_tmp_ = 0;
     arm_positions_[i] = KortexMathUtil::wrapRadiansFromMinusPiToPi(
       KortexMathUtil::toRad(feedback_.actuators(i).position()));  // rad
 
     in_fault_ += (feedback_.actuators(i).fault_bank_a() + feedback_.actuators(i).fault_bank_b());
-
-    // TODO(livanov93): separate warnings into another variable to expose it via fault controller
-    //       feedback_.actuators(i).warning_bank_a() + feedback_.actuators(i).warning_bank_b());
   }
 
-  // add all base's faults and warnings into series
+  // add all base's faults and warnings
   in_fault_ += (feedback_.base().fault_bank_a() + feedback_.base().fault_bank_b());
 
-  // TODO(livanov93): separate warnings into another variable to expose it via fault controller
-  //     + feedback_.base().warning_bank_a() + feedback_.base().warning_bank_b());
-
-  // add mode that can't be easily reached
-  in_fault_ += (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_READY);
+  // If in_fault_ is non_zero, we won't be able to command the robot in write()
 
   return return_type::OK;
 }
 
 void KortexMultiInterfaceHardware::readGripperPosition()
 {
-  // max joint angle = 0.81 for robotiq_2f_85
+  // max joint angle = 0.81 rad for robotiq_2f_85
   // TODO(anyone) read in as parameter from kortex_controllers.yaml
-  if (use_internal_bus_gripper_comm_)
+  if (use_internal_bus_gripper_comm_) // Set to true in constructor
   {
     gripper_position_ =
       feedback_.interconnect().gripper_feedback().motor()[0].position() / 100.0 * 0.81;  // rad
@@ -802,7 +799,7 @@ void KortexMultiInterfaceHardware::readGripperPosition()
 return_type KortexMultiInterfaceHardware::write(
   const rclcpp::Time & /*time*/, const rclcpp::Duration & /*period*/)
 {
-  if (block_write)
+  if (block_write) // stops writing to robot while performing command switch
   {
     feedback_ = base_cyclic_.RefreshFeedback();
     return return_type::OK;
@@ -815,8 +812,7 @@ return_type KortexMultiInterfaceHardware::write(
       // change servoing mode first
       servoing_mode_hw_.set_servoing_mode(k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING);
       base_.SetServoingMode(servoing_mode_hw_);
-      // apply emergency stop - twice to make it sure as calling it once appeared to be unreliable
-      // (detected by testing)
+      // apply emergency stop - twice to make it sure it is applied
       base_.ApplyEmergencyStop(0, {false, 0, 100});
       base_.ApplyEmergencyStop(0, {false, 0, 100});
       // clear faults
@@ -844,13 +840,21 @@ return_type KortexMultiInterfaceHardware::write(
     {
       reset_fault_async_success_ = 0.0;
     }
-    reset_fault_cmd_ = NO_CMD;
+    reset_fault_cmd_ = NO_CMD; // To make sure the fault is triggered only once per fault command
   }
 
-  if (in_fault_ == 0.0)
+  if (in_fault_ == 0.0)  // robot NOT in fault state
   {
-    if (arm_mode_ == k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING)
+    if (arm_mode_ == k_api::Base::ServoingMode::SINGLE_LEVEL_SERVOING &&
+      (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_READY))  // Check both the intended and actual arm state
     {
+      if (gripper_controller_running_)
+      {
+      // gripper control
+      sendGripperCommand(
+        arm_mode_, gripper_command_position_, gripper_speed_command_, gripper_force_command_); // Can be commanded in both HIGH
+                                                                                              // and LOW level modes
+      }
       // Twist controller active
       if (twist_controller_running_)
       {
@@ -860,25 +864,23 @@ return_type KortexMultiInterfaceHardware::write(
       else
       {
         // Keep alive mode - no controller active
-        RCLCPP_DEBUG(LOGGER, "No controller active in SINGLE_LEVEL_SERVOING mode!");
+        RCLCPP_DEBUG(LOGGER, "No arm's controller active in SINGLE_LEVEL_SERVOING mode!");
       }
 
-      // gripper control
-      sendGripperCommand(
-        arm_mode_, gripper_command_position_, gripper_speed_command_, gripper_force_command_);
       // read after write in twist mode
       feedback_ = base_cyclic_.RefreshFeedback();
     }
     else if (
       (arm_mode_ == k_api::Base::ServoingMode::LOW_LEVEL_SERVOING) &&
-      (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_LOW_LEVEL))
+      (feedback_.base().active_state() == k_api::Common::ARMSTATE_SERVOING_LOW_LEVEL)) 
+                                                                                  // Check both the intended and actual arm state
     {
-      // Per joint controller active
-
+      if (gripper_controller_running_)
+      {
       // gripper control
       sendGripperCommand(
         arm_mode_, gripper_command_position_, gripper_speed_command_, gripper_force_command_);
-
+      }
       if (joint_based_controller_running_)
       {
         // send commands to the joints
@@ -887,8 +889,9 @@ return_type KortexMultiInterfaceHardware::write(
       else
       {
         // Keep alive mode - no controller active
-        feedback_ = base_cyclic_.RefreshFeedback();
-        RCLCPP_DEBUG(LOGGER, "No controller active in LOW_LEVEL_SERVOING mode !");
+        feedback_ = base_cyclic_.RefreshFeedback();  // feedback is not updated if sendJointCommands() is called since it 
+                                                    // is updated there
+        RCLCPP_DEBUG(LOGGER, "No arm's controller active in LOW_LEVEL_SERVOING mode!");
       }
     }
     else
@@ -897,18 +900,25 @@ return_type KortexMultiInterfaceHardware::write(
       feedback_ = base_cyclic_.RefreshFeedback();
       RCLCPP_DEBUG(
         LOGGER,
-        "Fault was not recognized on the robot but combination of Control Mode and Active State "
-        "are not supported!");
+        "Fault was not recognized on the robot but the combination of intended Control Mode and arm's Active State "
+        "is not supported!");
     }
   }
   else
   {
-    // this is needed when the robot was faulted
-    // so we can internally conclude it is not faulted anymore
+    // if the arm goes to fault there will be nowhere else to refresh the feedback and recognize if the fault got cleared
     feedback_ = base_cyclic_.RefreshFeedback();
   }
 
   return return_type::OK;
+}
+
+void KortexMultiInterfaceHardware::incrementId()
+{
+  // Incrementing the frame id for each sent command to ensure the arm executes the command otherwise it will be rejected
+  base_command_.set_frame_id(base_command_.frame_id() + 1);
+  if (base_command_.frame_id() > 65535) base_command_.set_frame_id(0);  // uint16_t max out  ==> enough to afford reusing 
+                                                                        // the same IDs
 }
 
 void KortexMultiInterfaceHardware::prepareCommands()
@@ -918,10 +928,12 @@ void KortexMultiInterfaceHardware::prepareCommands()
     // set command per joint
     cmd_degrees_tmp_ = static_cast<float>(
       KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
-    cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
-
+    //cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
+      
+    // Re-Add each actuator to the base_command_ in case the actuators where cleared
+    base_command_.add_actuators();
     base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
-    // Velocity command interface not implemented properly in the kortex api
+    // Velocity command interface not implemented
     // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
     base_command_.mutable_actuators(static_cast<int>(i))->set_command_id(base_command_.frame_id());
   }
@@ -937,7 +949,8 @@ void KortexMultiInterfaceHardware::sendJointCommands()
   // send the command to the robot
   try
   {
-    feedback_ = base_cyclic_.Refresh(base_command_);
+    base_command_.clear_interconnect();
+    feedback_ = base_cyclic_.Refresh(base_command_);  // sends the command to the arm and returns feedback
   }
   catch (k_api::KDetailedException & ex)
   {
@@ -963,19 +976,13 @@ void KortexMultiInterfaceHardware::sendJointCommands()
     feedback_ = base_cyclic_.RefreshFeedback();
     RCLCPP_ERROR_STREAM(LOGGER, "Standard exception: " << ex_std.what());
   }
-}
-
-void KortexMultiInterfaceHardware::incrementId()
-{
-  // Incrementing identifier ensures actuators can reject out of time frames
-  base_command_.set_frame_id(base_command_.frame_id() + 1);
-  if (base_command_.frame_id() > 65535) base_command_.set_frame_id(0);
+  // Make sure to read feedback even in the case of exception
 }
 
 void KortexMultiInterfaceHardware::sendGripperCommand(
   k_api::Base::ServoingMode arm_mode, double position, double velocity, double force)
 {
-  if (gripper_controller_running_ && !std::isnan(position) && use_internal_bus_gripper_comm_)
+  if (!std::isnan(position) && use_internal_bus_gripper_comm_)
   {
     try
     {
@@ -987,16 +994,22 @@ void KortexMultiInterfaceHardware::sendGripperCommand(
         finger->set_finger_identifier(1);
         finger->set_value(
           static_cast<float>(position / 0.81));  // This values needs to be between 0 and 1
-        base_.SendGripperCommand(gripper_command);
+        base_.SendGripperCommand(gripper_command);  // Sends command to move the gripper
       }
       else if (arm_mode == k_api::Base::ServoingMode::LOW_LEVEL_SERVOING)
       {
+        // Re-Initialize gripper's interconnect
+        base_command_.mutable_interconnect()->mutable_command_id()->set_identifier(0);
+        gripper_motor_command_ = base_command_.mutable_interconnect()->mutable_gripper_command()->add_motor_cmd();
         // % open/closed, this values needs to be between 0 and 100
-        gripper_motor_command_->set_position(static_cast<float>(position / 0.81 * 100.0));
+        gripper_motor_command_->set_position(static_cast<float>(position / 0.81 * 100.0)); // This values needs to be between 0 
+                                                                                          // and 100%
         // % gripper speed between 0 and 100 percent
         gripper_motor_command_->set_velocity(static_cast<float>(velocity));
         // % max force threshold, between 0 and 100
         gripper_motor_command_->set_force(static_cast<float>(force));
+        base_command_.clear_actuators();
+        feedback_ = base_cyclic_.Refresh(base_command_);  
       }
     }
     catch (k_api::KDetailedException & ex)
@@ -1027,4 +1040,5 @@ void KortexMultiInterfaceHardware::sendTwistCommand()
 #include "pluginlib/class_list_macros.hpp"
 
 PLUGINLIB_EXPORT_CLASS(
-  kortex_driver::KortexMultiInterfaceHardware, hardware_interface::SystemInterface)
+  kortex_driver::KortexMultiInterfaceHardware, hardware_interface::SystemInterface) // Needed so that ROS2 loads this class as
+                                                                                    // a System Interface at runtime
