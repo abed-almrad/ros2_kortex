@@ -930,8 +930,6 @@ void KortexMultiInterfaceHardware::prepareCommands()
       KortexMathUtil::wrapDegreesFromZeroTo360(KortexMathUtil::toDeg(arm_commands_positions_[i])));
     //cmd_vel_tmp_ = static_cast<float>(KortexMathUtil::toDeg(arm_commands_velocities_[i]));
       
-    // Re-Add each actuator to the base_command_ in case the actuators where cleared
-    base_command_.add_actuators();
     base_command_.mutable_actuators(static_cast<int>(i))->set_position(cmd_degrees_tmp_);
     // Velocity command interface not implemented
     // base_command_.mutable_actuators(i)->set_velocity(cmd_vel_tmp_);
@@ -949,7 +947,6 @@ void KortexMultiInterfaceHardware::sendJointCommands()
   // send the command to the robot
   try
   {
-    base_command_.clear_interconnect();
     feedback_ = base_cyclic_.Refresh(base_command_);  // sends the command to the arm and returns feedback
   }
   catch (k_api::KDetailedException & ex)
@@ -998,9 +995,6 @@ void KortexMultiInterfaceHardware::sendGripperCommand(
       }
       else if (arm_mode == k_api::Base::ServoingMode::LOW_LEVEL_SERVOING)
       {
-        // Re-Initialize gripper's interconnect
-        base_command_.mutable_interconnect()->mutable_command_id()->set_identifier(0);
-        gripper_motor_command_ = base_command_.mutable_interconnect()->mutable_gripper_command()->add_motor_cmd();
         // % open/closed, this values needs to be between 0 and 100
         gripper_motor_command_->set_position(static_cast<float>(position / 0.81 * 100.0)); // This values needs to be between 0 
                                                                                           // and 100%
@@ -1008,8 +1002,7 @@ void KortexMultiInterfaceHardware::sendGripperCommand(
         gripper_motor_command_->set_velocity(static_cast<float>(velocity));
         // % max force threshold, between 0 and 100
         gripper_motor_command_->set_force(static_cast<float>(force));
-        base_command_.clear_actuators();
-        feedback_ = base_cyclic_.Refresh(base_command_);  
+        feedback_ = base_cyclic_.Refresh(base_command_); // Send the gripper command to move the gripper 
       }
     }
     catch (k_api::KDetailedException & ex)
