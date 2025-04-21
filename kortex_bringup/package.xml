@@ -5,9 +5,9 @@
   <version>0.2.3</version>
   <description>Launch file and run-time configurations, e.g. controllers.</description>
 
-  <author>Marq Rasmussen</author>
+  <author>Abed</author>
 
-  <maintainer email="marq.rasmussen@picknik.ai">Marq Rasmussen</maintainer>
+  <maintainer email="robotogeddon@gmail.com">Abed</maintainer>
 
   <license>BSD</license>
 
@@ -22,7 +22,6 @@
   <exec_depend>rviz2</exec_depend>
   <exec_depend>urdf</exec_depend>
   <exec_depend>xacro</exec_depend>
-  <exec_depend>gazebo_ros2_control</exec_depend>
   <exec_depend>gripper_controllers</exec_depend>
   <exec_depend>joint_trajectory_controller</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>

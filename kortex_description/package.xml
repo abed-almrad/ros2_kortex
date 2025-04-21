@@ -8,9 +8,8 @@
     <p>This package contains configuration data, 3D models and launch files
 for Kortex arms and supported grippers</p>
   </description>
-  <author email="avannobel@kinova.ca">Alexandre Vannobel</author>
-  <maintainer email="avannobel@kinova.ca" />
-  <maintainer email="marq.rasmussen@picknik.ai">Marq Rasmussen</maintainer>
+  <author email="robotogeddon@gmail.com">Abed</author>
+  <maintainer email="robotogeddon@gmail.com">Abed</maintainer>
   <license>BSD</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
