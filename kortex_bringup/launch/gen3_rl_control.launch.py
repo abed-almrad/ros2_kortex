@@ -41,7 +41,6 @@ def launch_setup(context, *args, **kwargs):
     description_package = LaunchConfiguration("description_package")
     description_file = LaunchConfiguration("description_file")
     robot_name = LaunchConfiguration("robot_name")
-    prefix = LaunchConfiguration("prefix")
     gripper = LaunchConfiguration("gripper")
     gripper_max_velocity = LaunchConfiguration("gripper_max_velocity")
     gripper_max_force = LaunchConfiguration("gripper_max_force")
@@ -66,9 +65,6 @@ def launch_setup(context, *args, **kwargs):
             " ",
             "name:=",
             robot_name,
-            " ",
-            "prefix:=",
-            prefix,
             " ",
             "gripper:=",
             gripper,
@@ -257,15 +253,6 @@ def generate_launch_description():
             "robot_name",
             default_value="arm",
             description="Name of the robot.",
-        )
-    )
-    declared_arguments.append(
-        DeclareLaunchArgument(
-            "prefix",
-            default_value='""',
-            description="Prefix of the joint names, useful for \
-        multi-robot setup. If changed than also joint names in the controllers' configuration \
-        have to be updated.",
         )
     )
     declared_arguments.append(
