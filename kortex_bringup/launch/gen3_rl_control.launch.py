@@ -49,7 +49,8 @@ def launch_setup(context, *args, **kwargs):
     robot_hand_controller = LaunchConfiguration("robot_hand_controller")
     fault_controller = LaunchConfiguration("fault_controller")
     launch_rviz = LaunchConfiguration("launch_rviz")
-    use_internal_bus_gripper_comm = LaunchConfiguration("use_internal_bus_gripper_comm")
+    use_internal_bus_gripper_comm = LaunchConfiguration("use_internal_bus_gripper_comm") # This also helps us to identify 
+                                                                #whether we are dealing with real-life hardware or simulation
     gripper_joint_name = LaunchConfiguration("gripper_joint_name")
 
     robot_description_content = Command(
