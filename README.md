@@ -109,8 +109,7 @@ If the bug fix you need isn't in a released version or If you want to build this
    ```
    cd $COLCON_WS
    git clone -b Humble_Gazebo_Classic_Support --single-branch https://github.com/Kinovarobotics/ros2_kortex.git src/ros2_kortex
-   vcs import src --skip-existing --input src/ros2_kortex/ros2_kortex.$ROS_DISTRO.repos
-   vcs import src --skip-existing --input src/ros2_kortex/ros2_kortex-not-released.$ROS_DISTRO.repos
+   vcs import src --skip-existing --input src/ros2_kortex/rl_dependencies.repos
    ```
 
    If you plan on simulating the robot with ignition or gazebo, first install the simulator using the following commands:
@@ -122,12 +121,7 @@ If the bug fix you need isn't in a released version or If you want to build this
   ```
   Then make sure to pull the additional simulation packages. If you're on ROS2 Humble, run:
    ```
-   vcs import src --skip-existing --input src/ros2_kortex/simulation.humble.repos
-   ```
-
-   otherwise
-   ```
-   vcs import --skip-existing --input src/ros2_kortex/simulation.repos
+   vcs import src --skip-existing --input src/ros2_kortex/simulation_dependencies.repos
    ```
 
    If you plan on using MoveIt, you must make sure that you have it already [installed](https://moveit.ros.org/install-moveit2/binary/) either from binaries or by building it from source.
