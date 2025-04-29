@@ -2,7 +2,7 @@
 <robot name="robotiq_2f_85_model" xmlns:xacro="http://ros.org/wiki/xacro">
   <xacro:macro name="load_gripper" params="
     parent:=end_effector_link
-    prefix:=""
+    prefix
     use_internal_bus_gripper_comm:=false
     com_port:=/dev/ttyUSB0">
     <xacro:include filename="$(find robotiq_description)/urdf/robotiq_2f_85_macro.urdf.xacro" />
