@@ -274,7 +274,11 @@ CallbackReturn KortexMultiInterfaceHardware::on_init(const hardware_interface::H
     }
   }
 
-  if (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "true")
+  if(
+    (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "true") ||
+    (info_.hardware_parameters["use_internal_bus_gripper_comm"] == "True"))
+    // To be on the safe side, we should account for both True and true for the argument value parsed from 
+    // the launch file
   {
     use_internal_bus_gripper_comm_ = true;
     RCLCPP_INFO(LOGGER, "Using internal bus communication for gripper!");
