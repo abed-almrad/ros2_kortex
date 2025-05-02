@@ -387,6 +387,9 @@ KortexMultiInterfaceHardware::export_command_interfaces()
   command_interfaces.emplace_back(
     hardware_interface::CommandInterface("reset_fault", "command", &reset_fault_cmd_)); // zero or non-zero value putting the robot in fault state 
                                                                                         // (higher number ==> higher fault severity)
+  
+  command_interfaces.emplace_back(hardware_interface::CommandInterface("reset_fault", "async_success", &reset_fault_async_success_)); 
+  // Reports whether the fault state was successfully triggered (1.0) or not (0.0)
   return command_interfaces;
   // Command interfaces values are set by the controllers and communicated through the Controller Manager
 }
